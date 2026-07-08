@@ -60,6 +60,26 @@ export default function QuizTest({ activeQuiz, quizzes = [], onNavigateBack }: Q
   // Custom states for dialogs and inline messages to bypass iframe blocks
   const [validationError, setValidationError] = useState<string | null>(null);
   const [showIncompleteConfirm, setShowIncompleteConfirm] = useState(false);
+  const [departments, setDepartments] = useState<string[]>([]);
+
+  // Fetch departments dynamically
+  React.useEffect(() => {
+    fetch("/api/departments")
+      .then((res) => {
+        if (res.ok) return res.json();
+        throw new Error("Failed to fetch departments");
+      })
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setDepartments(data);
+        } else {
+          setDepartments(HOSPITAL_DEPARTMENTS);
+        }
+      })
+      .catch(() => {
+        setDepartments(HOSPITAL_DEPARTMENTS);
+      });
+  }, []);
 
   // Sync selectedQuiz if activeQuiz changes and we haven't started or completed the test
   React.useEffect(() => {
@@ -338,7 +358,7 @@ export default function QuizTest({ activeQuiz, quizzes = [], onNavigateBack }: Q
                 required
               >
                 <option value="">-- Chọn Khoa/Phòng của bạn --</option>
-                {HOSPITAL_DEPARTMENTS.map((dept) => (
+                {departments.map((dept) => (
                   <option key={dept} value={dept}>
                     {dept}
                   </option>

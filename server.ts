@@ -42,6 +42,35 @@ function saveQuizzes() {
 // Initial quizzes load
 loadQuizzes();
 
+const DEPARTMENTS_FILE = path.join(process.cwd(), "departments_store.json");
+let currentDepartments: string[] = [...HOSPITAL_DEPARTMENTS];
+
+function loadDepartments() {
+  try {
+    if (fs.existsSync(DEPARTMENTS_FILE)) {
+      const rawData = fs.readFileSync(DEPARTMENTS_FILE, "utf-8");
+      currentDepartments = JSON.parse(rawData);
+    } else {
+      currentDepartments = [...HOSPITAL_DEPARTMENTS];
+      saveDepartments();
+    }
+  } catch (error) {
+    console.error("Error reading departments file, initializing with defaults:", error);
+    currentDepartments = [...HOSPITAL_DEPARTMENTS];
+  }
+}
+
+function saveDepartments() {
+  try {
+    fs.writeFileSync(DEPARTMENTS_FILE, JSON.stringify(currentDepartments, null, 2), "utf-8");
+  } catch (error) {
+    console.error("Error saving departments to file:", error);
+  }
+}
+
+// Initial departments load
+loadDepartments();
+
 // Define a type for our state store
 interface ServerState {
   activeQuizId: string;
@@ -204,7 +233,87 @@ async function startServer() {
 
   // 1. Get hospital departments
   app.get("/api/departments", (req, res) => {
-    res.json(HOSPITAL_DEPARTMENTS);
+    res.json(currentDepartments);
+  });
+
+  // 1b. Add a new department
+  app.post("/api/departments", (req, res) => {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      res.status(400).json({ error: "Tên khoa/phòng không được để trống." });
+      return;
+    }
+    const cleanName = name.trim();
+    if (currentDepartments.some(dept => dept.toLowerCase() === cleanName.toLowerCase())) {
+      res.status(400).json({ error: "Khoa/Phòng này đã tồn tại trên hệ thống." });
+      return;
+    }
+    currentDepartments.push(cleanName);
+    saveDepartments();
+    res.json({ success: true, departments: currentDepartments });
+  });
+
+  // 1c. Edit a department name
+  app.put("/api/departments", (req, res) => {
+    const { oldName, newName } = req.body;
+    if (!oldName || !newName || !newName.trim()) {
+      res.status(400).json({ error: "Tên khoa/phòng không hợp lệ." });
+      return;
+    }
+    const cleanOldName = oldName.trim();
+    const cleanNewName = newName.trim();
+
+    const index = currentDepartments.findIndex(dept => dept === cleanOldName);
+    if (index === -1) {
+      res.status(400).json({ error: "Khoa/Phòng cần sửa không tồn tại." });
+      return;
+    }
+
+    if (cleanOldName.toLowerCase() !== cleanNewName.toLowerCase() && 
+        currentDepartments.some(dept => dept.toLowerCase() === cleanNewName.toLowerCase())) {
+      res.status(400).json({ error: "Tên khoa/phòng mới đã tồn tại trên hệ thống." });
+      return;
+    }
+
+    // Update the department name
+    currentDepartments[index] = cleanNewName;
+    saveDepartments();
+
+    // Update submissions that belonged to old name
+    let updatedCount = 0;
+    state.submissions.forEach(sub => {
+      if (sub.department === cleanOldName) {
+        sub.department = cleanNewName;
+        updatedCount++;
+      }
+    });
+
+    if (updatedCount > 0) {
+      saveState();
+    }
+
+    res.json({ success: true, departments: currentDepartments });
+  });
+
+  // 1d. Delete a department
+  app.delete("/api/departments", (req, res) => {
+    const { name } = req.body;
+    if (!name) {
+      res.status(400).json({ error: "Tên khoa/phòng không hợp lệ." });
+      return;
+    }
+    const cleanName = name.trim();
+    const index = currentDepartments.findIndex(dept => dept === cleanName);
+    if (index === -1) {
+      res.status(400).json({ error: "Khoa/Phòng cần xóa không tồn tại." });
+      return;
+    }
+
+    // Remove the department
+    currentDepartments.splice(index, 1);
+    saveDepartments();
+
+    res.json({ success: true, departments: currentDepartments });
   });
 
   // 2. Get active quiz
@@ -291,7 +400,7 @@ async function startServer() {
       res.status(400).json({ error: "Vui lòng nhập họ và tên." });
       return;
     }
-    if (!department || !HOSPITAL_DEPARTMENTS.includes(department)) {
+    if (!department || !currentDepartments.includes(department)) {
       res.status(400).json({ error: "Khoa/Phòng chọn không hợp lệ." });
       return;
     }
@@ -359,7 +468,7 @@ async function startServer() {
     const statsMap: Record<string, { submissionCount: number; totalScore: number }> = {};
     
     // Initialize stats for all departments
-    HOSPITAL_DEPARTMENTS.forEach((dept) => {
+    currentDepartments.forEach((dept) => {
       statsMap[dept] = { submissionCount: 0, totalScore: 0 };
     });
 
@@ -376,7 +485,7 @@ async function startServer() {
     });
 
     // Create DepartmentStat array and compute final emulation scores
-    const stats: DepartmentStat[] = HOSPITAL_DEPARTMENTS.map((dept) => {
+    const stats: DepartmentStat[] = currentDepartments.map((dept) => {
       const { submissionCount, totalScore } = statsMap[dept];
       const averageScore = submissionCount > 0 ? parseFloat((totalScore / submissionCount).toFixed(2)) : 0;
       
@@ -459,14 +568,16 @@ async function startServer() {
     state.activeQuizId = "week1";
     state.submissions = [];
     currentQuizzes = [...STATIC_QUIZZES];
+    currentDepartments = [...HOSPITAL_DEPARTMENTS];
     saveQuizzes();
+    saveDepartments();
     saveState();
     res.json({ success: true, message: "Hệ thống đã được đặt lại toàn bộ dữ liệu thành công." });
   });
 
   // 9. Seed a random submission (to show instant ranking changes)
   app.post("/api/seed", (req, res) => {
-    const randomDept = HOSPITAL_DEPARTMENTS[Math.floor(Math.random() * HOSPITAL_DEPARTMENTS.length)];
+    const randomDept = currentDepartments[Math.floor(Math.random() * currentDepartments.length)];
     
     // Pick a typical Vietnamese name
     const firstNames = ["Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Huỳnh", "Phan", "Vũ", "Võ", "Đặng"];

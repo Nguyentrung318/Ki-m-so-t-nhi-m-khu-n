@@ -18,7 +18,10 @@ import {
   Award,
   Download,
   Database,
-  Palette
+  Palette,
+  Edit2,
+  X,
+  Building2
 } from "lucide-react";
 import { Quiz, QUIZZES } from "../types";
 
@@ -72,6 +75,13 @@ export default function AdminPanel({
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
   const [quizFormError, setQuizFormError] = useState<string | null>(null);
   const [quizFormSuccess, setQuizFormSuccess] = useState<string | null>(null);
+
+  // Department Management state
+  const [adminDepartments, setAdminDepartments] = useState<string[]>([]);
+  const [newDeptName, setNewDeptName] = useState("");
+  const [editingDeptIndex, setEditingDeptIndex] = useState<number | null>(null);
+  const [editingDeptName, setEditingDeptName] = useState("");
+  const [deptToDelete, setDeptToDelete] = useState<string | null>(null);
 
   // Custom visual state confirmation and system alerts to prevent Iframe Blocked alerts
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -182,8 +192,94 @@ export default function AdminPanel({
     }
   };
 
+  // Fetch departments list
+  const fetchAdminDepartments = async () => {
+    try {
+      const res = await fetch("/api/departments");
+      if (!res.ok) throw new Error("Không thể tải danh sách khoa/phòng.");
+      const data = await res.json();
+      setAdminDepartments(data);
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
+
+  // Add department
+  const handleAddDepartment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDeptName.trim()) return;
+    const name = newDeptName.trim();
+    try {
+      const res = await fetch("/api/departments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Không thể thêm khoa/phòng.");
+      }
+      const data = await res.json();
+      setAdminDepartments(data.departments);
+      setNewDeptName("");
+      setAdminNotification({ type: "success", message: `Đã thêm khoa/phòng "${name}" thành công!` });
+    } catch (err: any) {
+      setAdminNotification({ type: "error", message: err.message });
+    }
+  };
+
+  // Edit department
+  const handleEditDepartment = async (oldName: string, newName: string) => {
+    if (!newName.trim() || oldName === newName.trim()) {
+      setEditingDeptIndex(null);
+      return;
+    }
+    const cleanNewName = newName.trim();
+    try {
+      const res = await fetch("/api/departments", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oldName, newName: cleanNewName })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Không thể sửa khoa/phòng.");
+      }
+      const data = await res.json();
+      setAdminDepartments(data.departments);
+      setEditingDeptIndex(null);
+      setAdminNotification({ type: "success", message: `Đã đổi tên khoa/phòng thành "${cleanNewName}" thành công!` });
+      // Refetch submissions because names might have changed
+      await fetchSubmissions();
+    } catch (err: any) {
+      setAdminNotification({ type: "error", message: err.message });
+    }
+  };
+
+  // Delete department
+  const handleDeleteDepartment = async (name: string) => {
+    try {
+      const res = await fetch("/api/departments", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Không thể xóa khoa/phòng.");
+      }
+      const data = await res.json();
+      setAdminDepartments(data.departments);
+      setDeptToDelete(null);
+      setAdminNotification({ type: "success", message: `Đã xóa khoa/phòng "${name}" thành công!` });
+    } catch (err: any) {
+      setAdminNotification({ type: "error", message: err.message });
+    }
+  };
+
   useEffect(() => {
     fetchSubmissions();
+    fetchAdminDepartments();
   }, [activeQuiz]);
 
   // Handle active quiz week change
@@ -234,6 +330,7 @@ export default function AdminPanel({
       setSeedCount(0);
       setAdminNotification({ type: "success", message: "Hệ thống đã được reset toàn bộ dữ liệu thành công!" });
       await fetchSubmissions();
+      await fetchAdminDepartments();
     } catch (err: any) {
       setAdminNotification({ type: "error", message: err.message || "Lỗi reset dữ liệu." });
     }
@@ -241,6 +338,7 @@ export default function AdminPanel({
 
   // Extract unique departments from submissions for filter dropdown
   const uniqueDepts = Array.from(new Set(submissions.map((s) => s.department))).sort();
+  const filterDepts = Array.from(new Set([...adminDepartments, ...uniqueDepts])).sort();
 
   // Filter submissions
   const filteredSubmissions = submissions.filter((sub) => {
@@ -299,6 +397,44 @@ export default function AdminPanel({
                 className="w-full bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs py-3.5 rounded-xl transition-all cursor-pointer shadow-lg shadow-red-500/10"
               >
                 Xác nhận xóa sạch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM DEPARTMENT DELETE CONFIRMATION MODAL OVERLAY */}
+      {deptToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex flex-col items-center text-center space-y-3">
+              <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center text-red-600">
+                <Trash2 className="w-8 h-8 animate-pulse" />
+              </div>
+              <h3 className="font-black text-gray-900 text-lg md:text-xl">
+                Xác Nhận Xóa Khoa / Phòng?
+              </h3>
+              <p className="text-xs text-gray-600 leading-relaxed font-medium">
+                Bạn có chắc chắn muốn xóa khoa/phòng <strong className="text-red-600 font-bold">"{deptToDelete}"</strong> khỏi danh sách?
+              </p>
+              <p className="text-[10px] text-gray-400 leading-relaxed">
+                * Lưu ý: Thao tác này chỉ xóa khoa/phòng khỏi danh sách đăng ký thi mới. Lịch sử làm bài trước đây (nếu có) vẫn được lưu giữ để đảm bảo tính khách quan của bảng xếp hạng.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeptToDelete(null)}
+                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-extrabold text-xs py-3.5 rounded-xl transition-all cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteDepartment(deptToDelete)}
+                className="w-full bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs py-3.5 rounded-xl transition-all cursor-pointer shadow-lg shadow-red-500/10"
+              >
+                Xác nhận xóa
               </button>
             </div>
           </div>
@@ -623,6 +759,107 @@ export default function AdminPanel({
         </form>
       </div>
 
+      {/* 2.5 DEPARTMENT LIST MANAGEMENT SECTION */}
+      <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 space-y-6">
+        <div className="flex items-center gap-2 border-b border-gray-50 pb-3 text-[#0F8245]">
+          <Building2 className="w-6 h-6" />
+          <h3 className="font-black text-gray-900 text-base">
+            Quản Lý Danh Sách Khoa / Phòng Công Tác
+          </h3>
+        </div>
+
+        {/* Form to add a department */}
+        <form onSubmit={handleAddDepartment} className="flex gap-2 max-w-md">
+          <input
+            type="text"
+            required
+            value={newDeptName}
+            onChange={(e) => setNewDeptName(e.target.value)}
+            placeholder="Nhập tên khoa/phòng mới..."
+            className="flex-1 bg-gray-50 border border-gray-200 focus:border-[#0F8245] rounded-xl px-4 py-2.5 text-xs text-gray-800 focus:outline-hidden font-medium"
+          />
+          <button
+            type="submit"
+            className="bg-[#0F8245] hover:bg-[#0c6b39] text-white text-xs font-extrabold px-5 py-2.5 rounded-xl transition-all flex items-center gap-1 cursor-pointer shrink-0"
+          >
+            <Plus className="w-4 h-4" /> Thêm Khoa/Phòng
+          </button>
+        </form>
+
+        {/* List of departments in a responsive grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {adminDepartments.map((dept, idx) => {
+            const isEditing = editingDeptIndex === idx;
+
+            return (
+              <div
+                key={idx}
+                className={`p-3 rounded-2xl border transition-all flex items-center justify-between ${
+                  isEditing
+                    ? "bg-emerald-50/50 border-emerald-200"
+                    : "bg-gray-50/40 border-gray-100 hover:border-gray-200"
+                }`}
+              >
+                {isEditing ? (
+                  <div className="flex items-center gap-1.5 w-full">
+                    <input
+                      type="text"
+                      value={editingDeptName}
+                      onChange={(e) => setEditingDeptName(e.target.value)}
+                      className="flex-1 bg-white border border-emerald-300 focus:border-[#0F8245] rounded-lg px-2.5 py-1.5 text-xs text-gray-800 focus:outline-hidden font-medium"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleEditDepartment(dept, editingDeptName)}
+                      className="px-2 py-1.5 bg-[#0F8245] text-white rounded-lg hover:bg-[#0c6b39] transition-all cursor-pointer text-[10px] font-bold"
+                      title="Lưu"
+                    >
+                      Lưu
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingDeptIndex(null)}
+                      className="px-2 py-1.5 bg-gray-200 text-gray-600 rounded-lg hover:bg-gray-300 transition-all cursor-pointer text-[10px] font-bold"
+                      title="Hủy"
+                    >
+                      Hủy
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <span className="text-xs font-bold text-gray-700 truncate mr-2" title={dept}>
+                      {dept}
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingDeptIndex(idx);
+                          setEditingDeptName(dept);
+                        }}
+                        className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-xl transition-all cursor-pointer"
+                        title="Sửa tên khoa/phòng"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeptToDelete(dept)}
+                        className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
+                        title="Xóa khoa/phòng"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* 3. LOG OF ALL SUBMISSIONS TABLE */}
       <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
         
@@ -659,7 +896,7 @@ export default function AdminPanel({
               className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs focus:outline-hidden focus:border-[#0F8245]"
             >
               <option value="">Tất cả các Khoa</option>
-              {uniqueDepts.map((dept) => (
+              {filterDepts.map((dept) => (
                 <option key={dept} value={dept}>
                   {dept}
                 </option>
