@@ -1,0 +1,6 @@
+{
+  "name": "Chấm Điểm & Xếp Hạng Thi Đua",
+  "description": "Hệ thống tự động chấm điểm và xếp hạng thi đua tức thì giữa các khoa phòng thuộc Trung tâm Y tế khu vực Bảo Thắng qua quét mã QR câu hỏi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
