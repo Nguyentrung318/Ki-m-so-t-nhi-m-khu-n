@@ -30,7 +30,7 @@ import {
   Cell 
 } from "recharts";
 import { motion, AnimatePresence } from "motion/react";
-import { Quiz, DepartmentStat } from "../types";
+import { Quiz, DepartmentStat, HOSPITAL_DEPARTMENTS } from "../types";
 
 interface EmulationDashboardProps {
   activeQuiz: Quiz | null;
@@ -65,6 +65,128 @@ export default function EmulationDashboard({
   const [isQrExpanded, setIsQrExpanded] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  const calculateLocalStats = (): StatsData => {
+    // 1. Get departments
+    let deptsList = HOSPITAL_DEPARTMENTS;
+    try {
+      const cachedDeptsStr = localStorage.getItem("hospital_quiz_departments");
+      if (cachedDeptsStr) {
+        const parsed = JSON.parse(cachedDeptsStr);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          deptsList = parsed;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    // 2. Get submissions
+    let submissionsList: any[] = [];
+    try {
+      const cachedSubsStr = localStorage.getItem("hospital_quiz_submissions");
+      if (cachedSubsStr) {
+        submissionsList = JSON.parse(cachedSubsStr);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    const currentQuizId = activeQuiz?.id || "week1";
+
+    // 3. Filter for active quiz
+    const activeSubmissions = submissionsList.filter(
+      (sub) => sub.quizId === currentQuizId
+    );
+
+    // 4. Group by department
+    const statsMap: Record<string, { submissionCount: number; totalScore: number }> = {};
+    deptsList.forEach((dept) => {
+      statsMap[dept] = { submissionCount: 0, totalScore: 0 };
+    });
+
+    activeSubmissions.forEach((sub) => {
+      if (!statsMap[sub.department]) {
+        statsMap[sub.department] = { submissionCount: 0, totalScore: 0 };
+      }
+      statsMap[sub.department].submissionCount++;
+      statsMap[sub.department].totalScore += sub.score;
+    });
+
+    // 5. Create DepartmentStat array and compute emulation scores
+    const deptStats: DepartmentStat[] = deptsList.map((dept) => {
+      const { submissionCount, totalScore } = statsMap[dept] || { submissionCount: 0, totalScore: 0 };
+      const averageScore = submissionCount > 0 ? parseFloat((totalScore / submissionCount).toFixed(2)) : 0;
+      const participationBonus = parseFloat(Math.min(submissionCount * 1.5, 20).toFixed(2));
+      const totalEmulationScore = parseFloat(Math.min((averageScore * 10) + participationBonus, 120).toFixed(2));
+
+      return {
+        department: dept,
+        submissionCount,
+        averageScore,
+        participationBonus,
+        totalEmulationScore,
+        rank: 0
+      };
+    });
+
+    // Sort by emulation score descending. If tied, sort by average score, then submission count
+    deptStats.sort((a, b) => {
+      if (b.totalEmulationScore !== a.totalEmulationScore) {
+        return b.totalEmulationScore - a.totalEmulationScore;
+      }
+      if (b.averageScore !== a.averageScore) {
+        return b.averageScore - a.averageScore;
+      }
+      return b.submissionCount - a.submissionCount;
+    });
+
+    // Assign ranks
+    let currentRank = 1;
+    for (let i = 0; i < deptStats.length; i++) {
+      if (i > 0 && deptStats[i].totalEmulationScore < deptStats[i - 1].totalEmulationScore) {
+        currentRank = i + 1;
+      }
+      deptStats[i].rank = currentRank;
+    }
+
+    // 6. Overall metrics
+    const totalParticipation = activeSubmissions.length;
+    const avgHospitalScore = totalParticipation > 0 
+      ? parseFloat((activeSubmissions.reduce((sum, s) => sum + s.score, 0) / totalParticipation).toFixed(2))
+      : 0;
+
+    const averageScorePercent = avgHospitalScore / 10;
+    const dailySavingRate = 125000;
+    const totalSavingsEstimate = Math.round(totalParticipation * dailySavingRate * averageScorePercent);
+
+    // 7. Latest submissions
+    const latestSubmissions = submissionsList.slice(0, 10).map((sub) => {
+      let qTitle = "Bài thi";
+      if (sub.quizId === "week1") qTitle = "CHUYÊN GIA PHÂN LOẠI RÁC";
+      else if (sub.quizId === "week2") qTitle = "CHIẾN BINH VỆ SĨ SỐ HÓA";
+      else if (sub.quizId === "week3") qTitle = "PHẢN ỨNG NHANH SỰ CỐ";
+      else if (sub.quizId === "week4") qTitle = "CÔNG DÂN SỐ Y TẾ";
+      
+      return {
+        id: sub.id,
+        employeeName: sub.employeeName,
+        department: sub.department,
+        score: sub.score,
+        timestamp: sub.timestamp,
+        quizTitle: qTitle
+      };
+    });
+
+    return {
+      activeQuizId: currentQuizId,
+      departments: deptStats,
+      totalParticipation,
+      avgHospitalScore,
+      totalSavingsEstimate,
+      latestSubmissions
+    };
+  };
+
   // Fetch stats from server
   const fetchStats = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -75,8 +197,10 @@ export default function EmulationDashboard({
       setStats(data);
       setError(null);
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Đã xảy ra lỗi khi kết nối máy chủ.");
+      console.warn("API metrics fetch failed, using local calculations:", err);
+      const localStats = calculateLocalStats();
+      setStats(localStats);
+      setError(null);
     } finally {
       setLoading(false);
       setIsRefreshing(false);

@@ -15,7 +15,7 @@ import {
   BookOpen,
   LayoutDashboard
 } from "lucide-react";
-import { Quiz } from "./types";
+import { Quiz, QUIZZES } from "./types";
 import EmulationDashboard from "./components/EmulationDashboard";
 import QuizTest from "./components/QuizTest";
 import AdminPanel from "./components/AdminPanel";
@@ -34,9 +34,14 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setQuizzes(data);
+        localStorage.setItem("hospital_quiz_quizzes", JSON.stringify(data));
+      } else {
+        throw new Error("HTTP error");
       }
     } catch (err) {
-      console.error("Error fetching quizzes list:", err);
+      console.warn("Error fetching quizzes list, using local fallback:", err);
+      const cached = localStorage.getItem("hospital_quiz_quizzes");
+      setQuizzes(cached ? JSON.parse(cached) : QUIZZES);
     }
   };
 
@@ -47,9 +52,24 @@ export default function App() {
       if (res.ok) {
         const quizData = await res.json();
         setActiveQuiz(quizData);
+        localStorage.setItem("hospital_quiz_active_quiz_id", quizData.id);
+      } else {
+        throw new Error("HTTP error");
       }
     } catch (err) {
-      console.error("Error fetching active quiz:", err);
+      console.warn("Error fetching active quiz, using local fallback:", err);
+      const cachedQuizId = localStorage.getItem("hospital_quiz_active_quiz_id") || "week1";
+      const cachedQuizzesStr = localStorage.getItem("hospital_quiz_quizzes");
+      let currentQuizzesList = QUIZZES;
+      if (cachedQuizzesStr) {
+        try {
+          currentQuizzesList = JSON.parse(cachedQuizzesStr);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      const found = currentQuizzesList.find((q: any) => q.id === cachedQuizId) || currentQuizzesList[0] || QUIZZES[0];
+      setActiveQuiz(found);
     } finally {
       setLoadingQuiz(false);
     }

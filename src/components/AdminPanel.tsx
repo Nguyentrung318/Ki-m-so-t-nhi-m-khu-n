@@ -23,7 +23,7 @@ import {
   X,
   Building2
 } from "lucide-react";
-import { Quiz, QUIZZES } from "../types";
+import { Quiz, QUIZZES, HOSPITAL_DEPARTMENTS } from "../types";
 
 interface AdminPanelProps {
   activeQuiz: Quiz | null;
@@ -185,8 +185,12 @@ export default function AdminPanel({
       const data = await res.json();
       setSubmissions(data);
       setError(null);
+      localStorage.setItem("hospital_quiz_submissions", JSON.stringify(data));
     } catch (err: any) {
-      setError(err.message || "Đã xảy ra lỗi khi tải dữ liệu.");
+      console.warn("API submissions load failed, using local storage fallback:", err);
+      const cached = localStorage.getItem("hospital_quiz_submissions");
+      setSubmissions(cached ? JSON.parse(cached) : []);
+      setError(null);
     } finally {
       setLoading(false);
     }
@@ -199,8 +203,11 @@ export default function AdminPanel({
       if (!res.ok) throw new Error("Không thể tải danh sách khoa/phòng.");
       const data = await res.json();
       setAdminDepartments(data);
+      localStorage.setItem("hospital_quiz_departments", JSON.stringify(data));
     } catch (err: any) {
-      console.error(err);
+      console.warn("API departments load failed, using local storage fallback:", err);
+      const cached = localStorage.getItem("hospital_quiz_departments");
+      setAdminDepartments(cached ? JSON.parse(cached) : HOSPITAL_DEPARTMENTS);
     }
   };
 
@@ -221,10 +228,22 @@ export default function AdminPanel({
       }
       const data = await res.json();
       setAdminDepartments(data.departments);
+      localStorage.setItem("hospital_quiz_departments", JSON.stringify(data.departments));
       setNewDeptName("");
       setAdminNotification({ type: "success", message: `Đã thêm khoa/phòng "${name}" thành công!` });
     } catch (err: any) {
-      setAdminNotification({ type: "error", message: err.message });
+      console.warn("Adding department locally:", err);
+      const cached = localStorage.getItem("hospital_quiz_departments");
+      let currentList = cached ? JSON.parse(cached) : HOSPITAL_DEPARTMENTS;
+      if (currentList.some((d: string) => d.toLowerCase() === name.toLowerCase())) {
+        setAdminNotification({ type: "error", message: "Khoa/Phòng này đã tồn tại trên hệ thống." });
+        return;
+      }
+      currentList.push(name);
+      localStorage.setItem("hospital_quiz_departments", JSON.stringify(currentList));
+      setAdminDepartments(currentList);
+      setNewDeptName("");
+      setAdminNotification({ type: "success", message: `Đã thêm khoa/phòng "${name}" thành công (Ngoại tuyến)!` });
     }
   };
 
@@ -247,12 +266,42 @@ export default function AdminPanel({
       }
       const data = await res.json();
       setAdminDepartments(data.departments);
+      localStorage.setItem("hospital_quiz_departments", JSON.stringify(data.departments));
       setEditingDeptIndex(null);
       setAdminNotification({ type: "success", message: `Đã đổi tên khoa/phòng thành "${cleanNewName}" thành công!` });
-      // Refetch submissions because names might have changed
       await fetchSubmissions();
     } catch (err: any) {
-      setAdminNotification({ type: "error", message: err.message });
+      console.warn("Editing department locally:", err);
+      const cached = localStorage.getItem("hospital_quiz_departments");
+      let currentList = cached ? JSON.parse(cached) : HOSPITAL_DEPARTMENTS;
+      if (currentList.some((d: string) => d.toLowerCase() === cleanNewName.toLowerCase() && d !== oldName)) {
+        setAdminNotification({ type: "error", message: "Tên khoa/phòng mới đã tồn tại trên hệ thống." });
+        return;
+      }
+      const idx = currentList.indexOf(oldName);
+      if (idx !== -1) {
+        currentList[idx] = cleanNewName;
+        localStorage.setItem("hospital_quiz_departments", JSON.stringify(currentList));
+      }
+      setAdminDepartments(currentList);
+      setEditingDeptIndex(null);
+      setAdminNotification({ type: "success", message: `Đã đổi tên khoa/phòng thành "${cleanNewName}" thành công (Ngoại tuyến)!` });
+      
+      const subsCached = localStorage.getItem("hospital_quiz_submissions");
+      if (subsCached) {
+        try {
+          const subs = JSON.parse(subsCached);
+          subs.forEach((sub: any) => {
+            if (sub.department === oldName) {
+              sub.department = cleanNewName;
+            }
+          });
+          localStorage.setItem("hospital_quiz_submissions", JSON.stringify(subs));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      await fetchSubmissions();
     }
   };
 
@@ -270,10 +319,21 @@ export default function AdminPanel({
       }
       const data = await res.json();
       setAdminDepartments(data.departments);
+      localStorage.setItem("hospital_quiz_departments", JSON.stringify(data.departments));
       setDeptToDelete(null);
       setAdminNotification({ type: "success", message: `Đã xóa khoa/phòng "${name}" thành công!` });
     } catch (err: any) {
-      setAdminNotification({ type: "error", message: err.message });
+      console.warn("Deleting department locally:", err);
+      const cached = localStorage.getItem("hospital_quiz_departments");
+      let currentList = cached ? JSON.parse(cached) : HOSPITAL_DEPARTMENTS;
+      const idx = currentList.indexOf(name);
+      if (idx !== -1) {
+        currentList.splice(idx, 1);
+        localStorage.setItem("hospital_quiz_departments", JSON.stringify(currentList));
+      }
+      setAdminDepartments(currentList);
+      setDeptToDelete(null);
+      setAdminNotification({ type: "success", message: `Đã xóa khoa/phòng "${name}" thành công (Ngoại tuyến)!` });
     }
   };
 
@@ -293,9 +353,13 @@ export default function AdminPanel({
       });
       if (!res.ok) throw new Error("Không thể thay đổi đề thi kích hoạt.");
       onActiveQuizChange(quizId);
+      localStorage.setItem("hospital_quiz_active_quiz_id", quizId);
       setAdminNotification({ type: "success", message: "Đã đổi đề thi kích hoạt sang tuần mới thành công!" });
     } catch (err: any) {
-      setAdminNotification({ type: "error", message: err.message || "Lỗi khi đổi đề thi." });
+      console.warn("Changing active quiz locally:", err);
+      onActiveQuizChange(quizId);
+      localStorage.setItem("hospital_quiz_active_quiz_id", quizId);
+      setAdminNotification({ type: "success", message: "Đã đổi đề thi kích hoạt sang tuần mới thành công (Ngoại tuyến)!" });
     }
   };
 

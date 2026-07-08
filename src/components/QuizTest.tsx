@@ -230,6 +230,22 @@ export default function QuizTest({ activeQuiz, quizzes = [], onNavigateBack }: Q
       setCorrections(data.corrections);
       setIsOfflineMode(false);
       setIsSubmitted(true);
+
+      // Save to localStorage as a local copy/backup
+      try {
+        const existingSubmissionsStr = localStorage.getItem("hospital_quiz_submissions");
+        let existingSubmissions: any[] = [];
+        if (existingSubmissionsStr) {
+          existingSubmissions = JSON.parse(existingSubmissionsStr);
+        }
+        // Avoid duplicate ID
+        if (!existingSubmissions.some(s => s.id === data.submission.id)) {
+          existingSubmissions.unshift(data.submission);
+          localStorage.setItem("hospital_quiz_submissions", JSON.stringify(existingSubmissions));
+        }
+      } catch (e) {
+        console.error("Failed to save copy to localStorage:", e);
+      }
       
       // Play delightful synthetic chime!
       playVictorySound(data.submission.score === 10);
@@ -254,6 +270,29 @@ export default function QuizTest({ activeQuiz, quizzes = [], onNavigateBack }: Q
         };
       });
       const localScore = Math.round((localCorrectCount / selectedQuiz.questions.length) * 10);
+
+      const newSubmission = {
+        id: "sub_" + Math.random().toString(36).substring(2, 11),
+        employeeName: employeeName.trim(),
+        department: selectedDept,
+        quizId: selectedQuiz.id,
+        score: localScore,
+        correctAnswersCount: localCorrectCount,
+        answers: userAnswers,
+        timestamp: new Date().toISOString()
+      };
+
+      try {
+        const existingSubmissionsStr = localStorage.getItem("hospital_quiz_submissions");
+        let existingSubmissions: any[] = [];
+        if (existingSubmissionsStr) {
+          existingSubmissions = JSON.parse(existingSubmissionsStr);
+        }
+        existingSubmissions.unshift(newSubmission);
+        localStorage.setItem("hospital_quiz_submissions", JSON.stringify(existingSubmissions));
+      } catch (e) {
+        console.error("Failed to save fallback submission to localStorage:", e);
+      }
 
       setResultScore(localScore);
       setCorrectAnswersCount(localCorrectCount);
