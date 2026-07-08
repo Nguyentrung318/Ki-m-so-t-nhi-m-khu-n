@@ -61,6 +61,7 @@ export default function QuizTest({ activeQuiz, quizzes = [], onNavigateBack }: Q
   const [validationError, setValidationError] = useState<string | null>(null);
   const [showIncompleteConfirm, setShowIncompleteConfirm] = useState(false);
   const [departments, setDepartments] = useState<string[]>([]);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
 
   // Fetch departments dynamically
   React.useEffect(() => {
@@ -189,6 +190,7 @@ export default function QuizTest({ activeQuiz, quizzes = [], onNavigateBack }: Q
     setShowIncompleteConfirm(false);
     setSubmitting(true);
     setSubmitError(null);
+    setIsOfflineMode(false);
 
     try {
       const response = await fetch("/api/submit", {
@@ -202,24 +204,66 @@ export default function QuizTest({ activeQuiz, quizzes = [], onNavigateBack }: Q
         })
       });
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Nộp bài không thành công.");
+      let data: any = null;
+      let isJson = false;
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        try {
+          data = await response.json();
+          isJson = true;
+        } catch (e) {
+          console.error("Failed to parse JSON", e);
+        }
       }
 
-      const data = await response.json();
+      if (!response.ok) {
+        const errorMsg = isJson && data?.error ? data.error : `Mã lỗi: ${response.status}`;
+        throw new Error(errorMsg);
+      }
+
+      if (!isJson || !data) {
+        throw new Error("Phản hồi không đúng định dạng JSON.");
+      }
       
       setResultScore(data.submission.score);
       setCorrectAnswersCount(data.submission.correctAnswersCount);
       setCorrections(data.corrections);
+      setIsOfflineMode(false);
       setIsSubmitted(true);
       
       // Play delightful synthetic chime!
       playVictorySound(data.submission.score === 10);
 
     } catch (err: any) {
-      console.error(err);
-      setSubmitError(err.message || "Đã xảy ra lỗi khi kết nối máy chủ.");
+      console.warn("API submission failed, falling back to local calculation:", err);
+      
+      // Calculate results completely offline as fallback
+      let localCorrectCount = 0;
+      const localCorrections = selectedQuiz.questions.map((q) => {
+        const userAnswer = userAnswers[q.id] || "";
+        const isCorrect = userAnswer.toUpperCase() === q.correctAnswer.toUpperCase();
+        if (isCorrect) {
+          localCorrectCount++;
+        }
+        return {
+          id: q.id,
+          isCorrect,
+          userAnswer,
+          correctAnswer: q.correctAnswer,
+          explanation: q.explanation || "Không có giải thích chi tiết."
+        };
+      });
+      const localScore = Math.round((localCorrectCount / selectedQuiz.questions.length) * 10);
+
+      setResultScore(localScore);
+      setCorrectAnswersCount(localCorrectCount);
+      setCorrections(localCorrections);
+      setIsOfflineMode(true);
+      setIsSubmitted(true);
+      setSubmitError(null); // Clear errors since fallback succeeded
+      
+      // Play delightful synthetic chime!
+      playVictorySound(localScore === 10);
     } finally {
       setSubmitting(false);
     }
@@ -504,6 +548,19 @@ export default function QuizTest({ activeQuiz, quizzes = [], onNavigateBack }: Q
       {isSubmitted && (
         <div className="p-6 md:p-8 space-y-6 flex-1 overflow-y-auto max-h-[700px]">
           
+          {isOfflineMode && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-xs font-semibold leading-relaxed flex gap-3 animate-in fade-in duration-300">
+              <span className="text-xl shrink-0">💡</span>
+              <div>
+                <p className="font-extrabold text-amber-900">Tính Điểm Ngoại Tuyến (Offline Mode)</p>
+                <p className="text-amber-700 font-medium mt-1 leading-relaxed">
+                  Hệ thống không thể kết nối đến máy chủ lưu trữ chính thức (do bạn đang truy cập qua máy chủ tĩnh Vercel hoặc lỗi mạng). 
+                  Để đảm bảo quyền lợi, bài làm của bạn đã được <strong>chấm điểm tự động tức thì trên trình duyệt</strong> giúp bạn xem ngay kết quả & giải thích chi tiết khoa học.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Summary Score Card */}
           <div className="bg-emerald-50 border border-emerald-100 rounded-3xl p-6 text-center space-y-3 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-24 h-24 bg-emerald-100/40 rounded-full -translate-x-6 -translate-y-6"></div>
@@ -553,6 +610,7 @@ export default function QuizTest({ activeQuiz, quizzes = [], onNavigateBack }: Q
                 setIsSubmitted(false);
                 setUserAnswers({});
                 setCurrentQuestionIndex(0);
+                setIsOfflineMode(false);
               }}
               className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold py-3.5 px-6 rounded-xl transition-all cursor-pointer"
             >
